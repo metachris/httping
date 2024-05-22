@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -52,6 +51,7 @@ func main() {
 	urlPtr := flag.String("url", "", "Requested URL")
 	httpverbPtr := flag.String("httpverb", "GET", "HTTP Verb: Only GET or HEAD supported at the moment")
 	countPtr := flag.Int("count", 10, "Number of requests to send")
+	concurrencyPtr := flag.Int("threads", 1, "Number of concurrent requests to send")
 	listenPtr := flag.Int("listen", 0, "Enable listener mode on specified port, e.g. '-r 80'")
 	hostHeaderPtr := flag.String("hostheader", "", "Optional: Host header")
 	jsonResultsPtr := flag.Bool("json", false, "If true, produces output in json format")
@@ -93,6 +93,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Exit if the number of concurrency is zero, print usage
+	if *concurrencyPtr < 1 {
+		flag.Usage()
+		fmt.Printf("\nNumber of concurrency has to be greater than 0!\n\n")
+
+		os.Exit(1)
+	}
+
 	// Check what protocol has been specified in the URL by checking the first 7 or 8 chars.
 	// If none specified, fall back to HTTP
 	if len(urlStr) > 6 {
@@ -130,7 +138,7 @@ func main() {
 		hostHeader = url.Host
 	}
 
-	if jsonResults == false {
+	if !jsonResults {
 		fmt.Printf("HTTP %s to %s (%s):\n", httpVerb, url.Host, urlStr)
 	}
 	ping(httpVerb, url, *countPtr, hostHeader, jsonResults)
@@ -171,13 +179,14 @@ func ping(httpVerb string, url *url.URL, count int, hostHeader string, jsonResul
 			// Add all the response times to calculate the average later
 			timeTotal += responseTime
 
+			body, _ := io.ReadAll(result.Body)
+			result.Body.Close() // need to close the body to reuse http connections - https://stackoverflow.com/questions/17948827/reusing-http-connections-in-go
+
 			// Calculate the downloaded bytes
-			body, _ := ioutil.ReadAll(result.Body)
 			bytes := len(body)
 
 			// Print result on screen
-			if jsonResults == true {
-
+			if jsonResults {
 				// Get the json ready
 				results := &Result{
 					Host:        url.Host,
@@ -192,7 +201,6 @@ func ping(httpVerb string, url *url.URL, count int, hostHeader string, jsonResul
 				resultsMarshaled, _ := json.Marshal(results)
 
 				fmt.Println(string(resultsMarshaled))
-
 			} else {
 				fmt.Printf("connected to %s, seq=%d, httpVerb=%s, httpStatus=%d, bytes=%d, RTT=%.2f ms\n", url, i, httpVerb, result.StatusCode, bytes, float32(responseTime)/1e6)
 			}
